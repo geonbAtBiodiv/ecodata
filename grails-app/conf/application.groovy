@@ -620,6 +620,7 @@ environments {
         grails.mail.host="localhost"
         grails.mail.port=1025
         temp.dir="/data/ecodata/tmp"
+        spring.autoconfigure.exclude="au.org.ala.ecodata.IntegrationTestConfiguration"
     }
     test {
         // Override disk store so the travis build doesn't fail.
@@ -652,6 +653,7 @@ environments {
         security.cas.bypass = true
         security.cas.casServerUrlPrefix="http://devt.ala.org.au:${wiremock.port}/cas"
         security.cas.loginUrl="${security.cas.casServerUrlPrefix}/login"
+        spring.autoconfigure.exclude="au.org.ala.ecodata.IntegrationTestConfiguration"
     }
     meritfunctionaltest {
         grails.cache.config = {
@@ -692,11 +694,13 @@ environments {
         // Schedule the audit thread frequently during functional tests to get less indexing errors because
         // the data was cleaned up before the audit ran
         audit.thread.schedule.interval = 500l;
+        spring.autoconfigure.exclude="au.org.ala.ws.security.AlaWsSecurityConfiguration"
     }
     production {
         grails.logging.jul.usebridge = false
         app.elasticsearch.indexAllOnStartup = false // Makes deployments too slow
         app.external.model.dir = "/data/ecodata/models/"
+        spring.autoconfigure.exclude="au.org.ala.ecodata.IntegrationTestConfiguration"
     }
 }
 
