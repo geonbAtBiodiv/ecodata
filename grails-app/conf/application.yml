@@ -262,3 +262,9 @@ openapi:
         url: https://www.mozilla.org/en-US/MPL/1.1/
     version: '@info.app.version@'
     cachetimeoutms: 0
+
+---
+security:
+    jwt:
+        required-scopes:
+            - ecodata/write_test

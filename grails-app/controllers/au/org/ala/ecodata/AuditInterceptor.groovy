@@ -10,6 +10,8 @@ class AuditInterceptor implements GrailsConfigurationAware {
     UserService userService
     AuthService authService
 
+    int order = -1
+
     public AuditInterceptor() {
         matchAll()
     }

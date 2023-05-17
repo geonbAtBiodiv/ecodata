@@ -1,8 +1,19 @@
 package au.org.ala.ecodata
 
 import au.org.ala.web.AlaSecured
+import au.org.ala.web.AuthService
+import au.org.ala.ws.security.client.AlaOidcClient
+import com.nimbusds.oauth2.sdk.token.BearerAccessToken
 import grails.converters.JSON
 import grails.web.http.HttpHeaders
+import org.pac4j.core.config.Config
+import org.pac4j.core.context.WebContext
+import org.pac4j.core.context.session.SessionStore
+import org.pac4j.core.credentials.Credentials
+import org.pac4j.core.util.FindBest
+import org.pac4j.jee.context.JEEContextFactory
+import org.pac4j.oidc.credentials.OidcCredentials
+import org.springframework.beans.factory.annotation.Autowired
 
 import javax.servlet.http.HttpServletRequest
 
@@ -14,6 +25,10 @@ class ApiKeyInterceptor {
     PermissionService permissionService
     CommonService commonService
     ActivityService activityService
+    @Autowired(required = false)
+    AlaOidcClient alaOidcClient
+    @Autowired(required = false)
+    Config config
 
     def LOCALHOST_IP = '127.0.0.1'
 
@@ -32,7 +47,13 @@ class ApiKeyInterceptor {
             PreAuthorise pa = method.getAnnotation(PreAuthorise) ?: controllerClass.getAnnotation(PreAuthorise)
 
             if (pa.basicAuth()) {
-                request.userId = userService.authorize(request.getHeader('userName'), request.getHeader('authKey'))
+                request.userId = userService.getCurrentUserDetails()?.userId
+
+                // will be switched off when cognito migration is complete
+                if (grailsApplication.config.getProperty('authkey.check', Boolean, false) && !request.userId) {
+                    request.userId = userService.authorize(request.getHeader('userName'), request.getHeader('authKey'))
+                }
+
                 if(permissionService.isUserAlaAdmin(request.userId)) {
                     /* Don't enforce check for ALA admin.*/
                 }
@@ -87,9 +108,22 @@ class ApiKeyInterceptor {
 
                 // Support RequireApiKey on top of ip restriction.
                 if(controllerClass?.isAnnotationPresent(RequireApiKey) || method?.isAnnotationPresent(RequireApiKey)){
-                    def keyOk = commonService.checkApiKey(request.getHeader('Authorization')).valid
-                    if(!keyOk) {
-                        log.warn("No valid api key for ${controllerName}/${actionName}")
+                    boolean valid = false
+                    String token = request.getHeader('Authorization')
+                    if (token?.startsWith('Bearer')) {
+                        WebContext context = FindBest.webContextFactory(null, config, JEEContextFactory.INSTANCE).newContext(request, response)
+                        SessionStore sessionStore = config.sessionStore
+                        Optional credentialOpt = alaOidcClient.retrieveCredentials(context, sessionStore)
+                        Credentials credentials = credentialOpt.get()
+                        valid = credentials ? true : false
+                    }
+                    else if (grailsApplication.config.getProperty('security.apikey.enabled', Boolean, false)) {
+                        def keyOk = commonService.checkApiKey(token).valid
+                        valid = keyOk
+                    }
+
+                    if (!valid) {
+                        log.warn("No valid JWT or api key for ${controllerName}/${actionName}")
                         result.status = 403
                         result.error = "not authorised"
                     }
