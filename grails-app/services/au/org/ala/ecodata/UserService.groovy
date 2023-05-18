@@ -1,10 +1,19 @@
 package au.org.ala.ecodata
 
 import au.org.ala.userdetails.UserDetailsClient
-import au.org.ala.userdetails.UserDetailsFromIdListRequest
 import au.org.ala.web.AuthService
+import au.org.ala.ws.security.client.AlaOidcClient
 import grails.core.GrailsApplication
-import grails.plugin.cache.Cacheable
+import org.grails.web.servlet.mvc.GrailsWebRequest
+import org.pac4j.core.config.Config
+import org.pac4j.core.context.WebContext
+import org.pac4j.core.credentials.Credentials
+import org.pac4j.core.util.FindBest
+import org.pac4j.jee.context.JEEContextFactory
+import org.springframework.beans.factory.annotation.Autowired
+
+import javax.servlet.http.HttpServletRequest
+import javax.servlet.http.HttpServletResponse
 
 class UserService {
 
@@ -13,9 +22,14 @@ class UserService {
     WebService webService
     GrailsApplication grailsApplication
     UserDetailsClient userDetailsClient
+    @Autowired(required = false)
+    AlaOidcClient alaOidcClient
+    @Autowired(required = false)
+    Config config
 
     /** Limit to the maximum number of Users returned by queries */
     static final int MAX_QUERY_RESULT_SIZE = 1000
+    static String AUTHORIZATION_HEADER_FIELD = "Authorization"
 
     private static ThreadLocal<UserDetails> _currentUser = new ThreadLocal<UserDetails>()
 
@@ -199,5 +213,30 @@ class UserService {
      */
     User findByUserId(String userId) {
         User.findByUserId(userId)
+    }
+
+    def getUserFromJWT(String authorizationHeader = null) {
+        if((config == null) || (alaOidcClient == null))
+            return
+
+        GrailsWebRequest grailsWebRequest = GrailsWebRequest.lookup()
+        HttpServletRequest request = grailsWebRequest.getCurrentRequest()
+        HttpServletResponse response = grailsWebRequest.getCurrentResponse()
+        if (!authorizationHeader)
+            authorizationHeader = request?.getHeader(AUTHORIZATION_HEADER_FIELD)
+        if (authorizationHeader?.startsWith("Bearer")) {
+            final WebContext context = FindBest.webContextFactory(null, config, JEEContextFactory.INSTANCE).newContext(request, response)
+            def optCredentials = alaOidcClient.getCredentials(context, config.sessionStore)
+            if (optCredentials.isPresent()) {
+                Credentials credentials = optCredentials.get()
+                def optUserProfile = alaOidcClient.getUserProfile(credentials, context, config.sessionStore)
+                if (optUserProfile.isPresent()) {
+                    def userProfile = optUserProfile.get()
+                    if(userProfile?.userId) {
+                        setCurrentUser(userProfile?.userId)
+                    }
+                }
+            }
+        }
     }
 }

@@ -29,6 +29,7 @@ class ApiKeyInterceptor {
     AlaOidcClient alaOidcClient
     @Autowired(required = false)
     Config config
+    AuthService authService
 
     def LOCALHOST_IP = '127.0.0.1'
 
@@ -47,10 +48,16 @@ class ApiKeyInterceptor {
             PreAuthorise pa = method.getAnnotation(PreAuthorise) ?: controllerClass.getAnnotation(PreAuthorise)
 
             if (pa.basicAuth()) {
-                request.userId = userService.getCurrentUserDetails()?.userId
+                def user = userService.getCurrentUserDetails()
+
+                if (!user) {
+                    userService.getUserFromJWT()
+                    user = userService.getCurrentUserDetails()
+                    request.userId = user?.userId
+                }
 
                 // will be switched off when cognito migration is complete
-                if (grailsApplication.config.getProperty('authkey.check', Boolean, false) && !request.userId) {
+                if (grailsApplication.config.getProperty('authkey.check', Boolean, false) && !user) {
                     request.userId = userService.authorize(request.getHeader('userName'), request.getHeader('authKey'))
                 }
 
