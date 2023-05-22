@@ -3,8 +3,8 @@ package au.org.ala.ecodata
 import au.org.ala.web.AlaSecured
 import au.org.ala.web.AuthService
 import au.org.ala.ws.security.client.AlaOidcClient
-import com.nimbusds.oauth2.sdk.token.BearerAccessToken
 import grails.converters.JSON
+import grails.core.support.GrailsConfigurationAware
 import grails.web.http.HttpHeaders
 import org.pac4j.core.config.Config
 import org.pac4j.core.context.WebContext
@@ -12,13 +12,12 @@ import org.pac4j.core.context.session.SessionStore
 import org.pac4j.core.credentials.Credentials
 import org.pac4j.core.util.FindBest
 import org.pac4j.jee.context.JEEContextFactory
-import org.pac4j.oidc.credentials.OidcCredentials
 import org.springframework.beans.factory.annotation.Autowired
 
 import javax.servlet.http.HttpServletRequest
 
-class ApiKeyInterceptor {
-
+class ApiKeyInterceptor implements GrailsConfigurationAware {
+    static String httpRequestHeaderForUserId
     ProjectService projectService
     ProjectActivityService projectActivityService
     UserService userService
@@ -48,17 +47,16 @@ class ApiKeyInterceptor {
             PreAuthorise pa = method.getAnnotation(PreAuthorise) ?: controllerClass.getAnnotation(PreAuthorise)
 
             if (pa.basicAuth()) {
-                def user = userService.getCurrentUserDetails()
-
-                if (!user) {
-                    userService.getUserFromJWT()
-                    user = userService.getCurrentUserDetails()
-                    request.userId = user?.userId
-                }
+                String userId
+                request.userId = userId = userService.getUserIdFromJWT()
 
                 // will be switched off when cognito migration is complete
-                if (grailsApplication.config.getProperty('authkey.check', Boolean, false) && !user) {
-                    request.userId = userService.authorize(request.getHeader('userName'), request.getHeader('authKey'))
+                if (grailsApplication.config.getProperty('authkey.check', Boolean, false) && !userId) {
+                    userId = request.userId = userService.authorize(request.getHeader('userName'), request.getHeader('authKey'))
+                }
+
+                if (userId) {
+                    userService.setUser(false, userId)
                 }
 
                 if(permissionService.isUserAlaAdmin(request.userId)) {
@@ -112,6 +110,9 @@ class ApiKeyInterceptor {
                     result.status = 403
                     result.error = "not authorised"
                 }
+                else {
+                    userService.setUser(true)
+                }
 
                 // Support RequireApiKey on top of ip restriction.
                 if(controllerClass?.isAnnotationPresent(RequireApiKey) || method?.isAnnotationPresent(RequireApiKey)){
@@ -136,6 +137,9 @@ class ApiKeyInterceptor {
                     }
                 }
             }
+            else {
+                userService.setUser(false)
+            }
         }
 
         if(result.error) {
@@ -148,7 +152,9 @@ class ApiKeyInterceptor {
 
     boolean after() { true }
 
-    void afterView() { }
+    void afterView() {
+        userService.clearCurrentUser()
+    }
 
     /**
      * Client IP passes if it is in the whitelist of if the whitelist is empty apart from localhost.
@@ -157,6 +163,11 @@ class ApiKeyInterceptor {
      */
     boolean checkClientIp(List clientIps, List whiteList) {
         clientIps.size() > 0 && whiteList.containsAll(clientIps) || (whiteList.size() == 1 && whiteList[0] == LOCALHOST_IP)
+    }
+
+    @Override
+    void setConfiguration(grails.config.Config co) {
+        httpRequestHeaderForUserId = co.getProperty('app.http.header.userId', String)
     }
 
     private List buildWhiteList() {

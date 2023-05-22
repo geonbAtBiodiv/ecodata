@@ -2,18 +2,27 @@ package au.org.ala.ecodata
 
 import au.org.ala.userdetails.UserDetailsClient
 import au.org.ala.web.AuthService
+import au.org.ala.ws.security.authenticator.AlaOidcAuthenticator
 import au.org.ala.ws.security.client.AlaOidcClient
+import com.nimbusds.jose.JOSEException
+import com.nimbusds.jose.proc.BadJOSEException
+import com.nimbusds.jose.proc.JWSKeySelector
+import com.nimbusds.jose.proc.JWSVerificationKeySelector
+import com.nimbusds.jose.proc.SecurityContext
+import com.nimbusds.jwt.JWT
+import com.nimbusds.jwt.JWTClaimsSet
+import com.nimbusds.jwt.JWTParser
+import com.nimbusds.jwt.proc.ConfigurableJWTProcessor
+import com.nimbusds.jwt.proc.DefaultJWTClaimsVerifier
+import com.nimbusds.jwt.proc.DefaultJWTProcessor
 import grails.core.GrailsApplication
 import org.grails.web.servlet.mvc.GrailsWebRequest
 import org.pac4j.core.config.Config
-import org.pac4j.core.context.WebContext
-import org.pac4j.core.credentials.Credentials
-import org.pac4j.core.util.FindBest
-import org.pac4j.jee.context.JEEContextFactory
+import org.pac4j.core.exception.CredentialsException
 import org.springframework.beans.factory.annotation.Autowired
 
 import javax.servlet.http.HttpServletRequest
-import javax.servlet.http.HttpServletResponse
+import java.text.ParseException
 
 class UserService {
 
@@ -215,27 +224,67 @@ class UserService {
         User.findByUserId(userId)
     }
 
-    def getUserFromJWT(String authorizationHeader = null) {
+    String getUserIdFromJWT(String authorizationHeader = null) {
         if((config == null) || (alaOidcClient == null))
             return
 
         GrailsWebRequest grailsWebRequest = GrailsWebRequest.lookup()
         HttpServletRequest request = grailsWebRequest.getCurrentRequest()
-        HttpServletResponse response = grailsWebRequest.getCurrentResponse()
         if (!authorizationHeader)
             authorizationHeader = request?.getHeader(AUTHORIZATION_HEADER_FIELD)
+
         if (authorizationHeader?.startsWith("Bearer")) {
-            final WebContext context = FindBest.webContextFactory(null, config, JEEContextFactory.INSTANCE).newContext(request, response)
-            def optCredentials = alaOidcClient.getCredentials(context, config.sessionStore)
-            if (optCredentials.isPresent()) {
-                Credentials credentials = optCredentials.get()
-                def optUserProfile = alaOidcClient.getUserProfile(credentials, context, config.sessionStore)
-                if (optUserProfile.isPresent()) {
-                    def userProfile = optUserProfile.get()
-                    if(userProfile?.userId) {
-                        setCurrentUser(userProfile?.userId)
-                    }
-                }
+            final JWT jwt
+            try {
+                jwt = JWTParser.parse(authorizationHeader.replace("Bearer ", ""))
+            } catch (ParseException e) {
+                throw new CredentialsException("Cannot decrypt / verify JWT", e)
+            }
+
+            // Create a JWT processor for the access tokens
+            ConfigurableJWTProcessor<SecurityContext> jwtProcessor = new DefaultJWTProcessor<SecurityContext>()
+
+            // Configure the JWT processor with a key selector to feed matching public
+            // RSA keys sourced from the JWK set URL
+            AlaOidcAuthenticator authenticator = alaOidcClient.authenticator
+            JWSKeySelector<SecurityContext> keySelector = new JWSVerificationKeySelector<SecurityContext>(authenticator.expectedJWSAlgs, authenticator.keySource)
+            jwtProcessor.setJWSKeySelector(keySelector)
+
+            // Set the required JWT claims for access tokens issued by the server
+            // TODO externalise the required claims
+            jwtProcessor.setJWTClaimsSetVerifier(new DefaultJWTClaimsVerifier(new JWTClaimsSet.Builder().issuer(authenticator.issuer.getValue()).build(), Set.copyOf(authenticator.requiredClaims)))
+
+            try {
+                JWTClaimsSet claimsSet = jwtProcessor.process(jwt, null)
+                return (String) claimsSet.getClaim(authenticator.userIdClaim)
+            } catch (BadJOSEException e) {
+                return null
+            } catch (JOSEException e) {
+                return null
+            }
+        }
+    }
+
+    void setUser(boolean trustHeader = false, String userId = null) {
+        GrailsWebRequest grailsWebRequest = GrailsWebRequest.lookup()
+        HttpServletRequest request = grailsWebRequest.getCurrentRequest()
+
+        // userId is set from either the request param userId or failing that it tries to get it from
+        // the UserPrincipal (assumes ecodata is being accessed directly via admin page)
+        userId = userId ?: authService.getUserId()
+        if (!userId && trustHeader) {
+            userId = request.getHeader(ApiKeyInterceptor.httpRequestHeaderForUserId)
+        }
+
+        if (userId) {
+            def userDetails = setCurrentUser(userId)
+            if (userDetails) {
+                // We set the current user details in the request scope because
+                // the 'afterView' hook can be called prior to the actual rendering (despite the name)
+                // and the thread local can get clobbered before it is actually required.
+                // Consumers who have access to the request can simply extract current user details
+                // from there rather than use the service.
+                request.setAttribute(UserDetails.REQUEST_USER_DETAILS_KEY, userDetails)
             }
         }
     }
