@@ -22,7 +22,7 @@ plugins {
     id 'jacoco'
 }
 
-version "4.2-SNAPSHOT"
+version "4.2-COGNITO-SNAPSHOT"
 group "au.org.ala"
 description "Ecodata"
 
