@@ -5,6 +5,7 @@ import au.org.ala.web.AuthService
 import au.org.ala.ws.security.client.AlaOidcClient
 import grails.converters.JSON
 import grails.core.support.GrailsConfigurationAware
+import grails.util.Environment
 import grails.web.http.HttpHeaders
 import org.pac4j.core.config.Config
 import org.pac4j.core.context.WebContext
@@ -118,7 +119,10 @@ class ApiKeyInterceptor implements GrailsConfigurationAware {
                 if(controllerClass?.isAnnotationPresent(RequireApiKey) || method?.isAnnotationPresent(RequireApiKey)){
                     boolean valid = false
                     String token = request.getHeader('Authorization')
-                    if (token?.startsWith('Bearer')) {
+                    if (isFunctionalTest()) {
+                        valid = true
+                    }
+                    else if (token?.startsWith('Bearer')) {
                         WebContext context = FindBest.webContextFactory(null, config, JEEContextFactory.INSTANCE).newContext(request, response)
                         SessionStore sessionStore = config.sessionStore
                         Optional credentialOpt = alaOidcClient.retrieveCredentials(context, sessionStore)
@@ -168,6 +172,10 @@ class ApiKeyInterceptor implements GrailsConfigurationAware {
     @Override
     void setConfiguration(grails.config.Config co) {
         httpRequestHeaderForUserId = co.getProperty('app.http.header.userId', String)
+    }
+
+    boolean isFunctionalTest() {
+        Environment.current.name == "meritfunctionaltest"
     }
 
     private List buildWhiteList() {
