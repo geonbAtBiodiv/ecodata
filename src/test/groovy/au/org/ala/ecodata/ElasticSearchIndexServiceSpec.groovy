@@ -26,6 +26,7 @@ class ElasticSearchIndexServiceSpec extends MongoSpec implements ServiceUnitTest
     RestHighLevelClient client = GroovyMock(RestHighLevelClient) // Need a groovy mock here due to final methods
     SiteService siteService = Mock(SiteService)
     ActivityService activityService = Mock(ActivityService)
+    ProjectActivityService projectActivityService = Mock(ProjectActivityService)
     DocumentService documentService = Mock(DocumentService)
     CacheService cacheService = new CacheService()
 
@@ -37,6 +38,7 @@ class ElasticSearchIndexServiceSpec extends MongoSpec implements ServiceUnitTest
         service.projectService = projectService
         service.siteService = siteService
         service.activityService = activityService
+        service.projectActivityService = projectActivityService
         service.documentService = documentService
 
         JSON.registerObjectMarshaller(new MapMarshaller())
